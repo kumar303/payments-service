@@ -51,26 +51,48 @@ class TestPayMethod(AuthenticatedTestCase):
             self.pay_method,
         ]
 
-    def get(self, query=None):
+    def get(self, *args, **kw):
+        return self._request('get', *args, **kw)
+
+    def patch(self, *args, **kw):
+        return self._request('patch', *args, **kw)
+
+    def _request(self, method, query=None, **kw):
         url = self.url
         if query:
             url = '{url}?{query}'.format(url=url, query=query)
-        return self.json(self.client.get(url))
+        do_request = getattr(self.client, method)
+        return self.json(do_request(url, **kw))
 
-    def test_get_does_replace(self):
+    def test_get_params_are_replaced(self):
         request = RequestFactory().get('/')
 
         class FakeUser:
-            uuid = 'nope'
+            uuid = 'buyer-uuid'
 
         request.user = FakeUser()
-        eq_(((), {'active': 1, 'braintree_buyer__buyer__uuid': 'nope'}),
-            PayMethod().replace_call_args(request, ['foo'], {'f': 'b'}))
+        args, kw = PayMethod().replace_call_args(request, ['foo'], {'f': 'b'})
 
-    def test_patch_does_not_replace(self):
+        eq_(args, ['foo'])
+        eq_(kw, {'active': 1, 'braintree_buyer__buyer__uuid': 'buyer-uuid'})
+
+    def test_patch_params_are_replaced(self):
         request = RequestFactory().patch('/')
-        eq_((['foo'], {'f': 'b'}),
-            PayMethod().replace_call_args(request, ['foo'], {'f': 'b'}))
+
+        class FakeUser:
+            uuid = 'buyer-uuid'
+
+        request.user = FakeUser()
+        args, kw = PayMethod().replace_call_args(request, ['foo'], {'f': 'b'})
+
+        eq_(args, ['foo'])
+        eq_(kw, {'active': 1, 'braintree_buyer__buyer__uuid': 'buyer-uuid'})
+
+    def test_post_params_are_not_replaced(self):
+        request = RequestFactory().post('/')
+        args, kw = PayMethod().replace_call_args(request, ['foo'], {'f': 'b'})
+        eq_(args, ['foo'])
+        eq_(kw, {'f': 'b'})
 
     def test_override_active_flag(self):
         res, data = self.get(query='active=0')
@@ -91,19 +113,22 @@ class TestPayMethod(AuthenticatedTestCase):
                                 data=json.dumps({'active': False}),
                                 content_type='application/json')
         eq_(res.status_code, 200, res)
-        resource.patch.assert_called_with({'active': False})
+        resource.patch.assert_called_with(
+            {'active': False},
+            active=1, braintree_buyer__buyer__uuid=self.buyer_uuid,
+        )
 
-    def test_patch_wrong(self):
+    def test_bad_patch_request(self):
         res, pay_methods = self.get()
         pay_method = pay_methods[0]
 
         resource = mock.Mock()
-        resource.get.side_effect = HttpClientError
+        resource.patch.side_effect = HttpClientError
         self.solitude.braintree.mozilla.paymethod.return_value = resource
         res = self.client.patch(pay_method['resource_uri'],
                                 data=json.dumps({'active': False}),
                                 content_type='application/json')
-        eq_(res.status_code, 403, res)
+        eq_(res.status_code, 400, res)
 
 
 class TestSubscribe(AuthenticatedTestCase):

@@ -45,36 +45,14 @@ class PayMethod(SolitudeBodyguard):
         The important part is that it only lets you get
         payment methods for the logged in user.
         """
-        if request.method.lower() != 'get':
+        if request.method.lower() not in ('get', 'patch'):
             return args, kw
 
         replaced_kw = {
             'active': kw.get('active', 1),  # active by default
             'braintree_buyer__buyer__uuid': request.user.uuid,
         }
-        return tuple(), replaced_kw
-
-    def patch(self, request, pk=None):
-        """
-        Allow patching of payment methods.
-
-        * verify that the user wanting to make a patch is allowed too
-        * send through the patch
-        """
-        res = self.get(request, pk=pk)
-        # At the moment get returns a good or bad response as opposed to
-        # raising an error, but hides the status code from solitude.
-        #
-        # We'll assume anything not a 200 is 403.
-        if res.status_code != 200:
-            log.warning(
-                '_api_request returned: {} when trying to '
-                'access paymethod: {}, user: {}'
-                .format(res.status_code, pk, request.user.uuid)
-            )
-            return error_403('Not allowed')
-
-        return super(PayMethod, self).patch(request, pk=pk)
+        return args, replaced_kw
 
 
 class Subscriptions(APIView):
